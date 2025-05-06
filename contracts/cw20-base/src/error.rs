@@ -40,4 +40,7 @@ pub enum ContractError {
 
     #[error("Duplicate initial balance addresses")]
     DuplicateInitialBalanceAddresses {},
+
+    #[error("Account has been frozen")]
+    FrozenAccount {},
 }

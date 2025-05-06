@@ -20,7 +20,7 @@ use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 use crate::state::{
     MinterData, TokenInfo, ALLOWANCES, ALLOWANCES_SPENDER, BALANCES, LOGO, MARKETING_INFO,
-    TOKEN_INFO,
+    TOKEN_INFO, FROZEN_ACCOUNTS, 
 };
 
 // version info for migration info
@@ -232,6 +232,8 @@ pub fn execute(
         ExecuteMsg::UpdateMinter { new_minter } => {
             execute_update_minter(deps, env, info, new_minter)
         }
+        ExecuteMsg::Freeze { address } => execute_freeze(deps, info, address),
+        ExecuteMsg::Unfreeze { address } => execute_unfreeze(deps, info, address),
     }
 }
 
@@ -242,6 +244,11 @@ pub fn execute_transfer(
     recipient: String,
     amount: Uint128,
 ) -> Result<Response, ContractError> {
+    // Check if the account has been frozen
+    if FROZEN_ACCOUNTS.may_load(deps.storage, &info.sender)?.unwrap_or(false) {
+        return Err(ContractError::FrozenAccount {});
+    }
+
     let rcpt_addr = deps.api.addr_validate(&recipient)?;
 
     BALANCES.update(
@@ -345,6 +352,11 @@ pub fn execute_send(
     amount: Uint128,
     msg: Binary,
 ) -> Result<Response, ContractError> {
+    // Check if the account has been frozen
+    if FROZEN_ACCOUNTS.may_load(deps.storage, &info.sender)?.unwrap_or(false) {
+        return Err(ContractError::FrozenAccount {});
+    }
+
     let rcpt_addr = deps.api.addr_validate(&contract)?;
 
     // move the tokens to the contract
@@ -501,6 +513,56 @@ pub fn execute_upload_logo(
 
     let res = Response::new().add_attribute("action", "upload_logo");
     Ok(res)
+}
+
+pub fn execute_freeze(
+    deps: DepsMut,
+    info: MessageInfo,
+    address: String,
+) -> Result<Response, ContractError> {
+    let sender = info.sender;
+
+    // Use minter as admin
+    let config = TOKEN_INFO
+        .may_load(deps.storage)?
+        .ok_or(ContractError::Unauthorized {})?;
+    let admin = config.mint.as_ref().ok_or(ContractError::Unauthorized {})?;
+
+    if sender != admin.minter {
+        return Err(ContractError::Unauthorized {});
+    }
+
+    let addr = deps.api.addr_validate(&address)?;
+    FROZEN_ACCOUNTS.save(deps.storage, &addr, &true)?;
+
+    Ok(Response::new()
+        .add_attribute("action", "freeze")
+        .add_attribute("frozen_account", address))
+}
+
+pub fn execute_unfreeze(
+    deps: DepsMut,
+    info: MessageInfo,
+    address: String,
+) -> Result<Response, ContractError> {
+    let sender = info.sender;
+
+    // Use minter as admin
+    let config = TOKEN_INFO
+        .may_load(deps.storage)?
+        .ok_or(ContractError::Unauthorized {})?;
+    let admin = config.mint.as_ref().ok_or(ContractError::Unauthorized {})?;
+
+    if sender != admin.minter {
+        return Err(ContractError::Unauthorized {});
+    }
+
+    let addr = deps.api.addr_validate(&address)?;
+    FROZEN_ACCOUNTS.remove(deps.storage, &addr);
+
+    Ok(Response::new()
+        .add_attribute("action", "freeze")
+        .add_attribute("unfrozen_account", address))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
